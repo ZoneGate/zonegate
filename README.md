@@ -72,26 +72,42 @@ Flutter. To rebuild it on its own:
 docker compose up mobile
 ```
 
-The APK lands in `zonegate-mobile/build/app/outputs/flutter-apk/`. It reaches
-the API at `http://10.0.2.2:8000` on an emulator; to bake in another address,
-for a handset on the same Wi-Fi for instance:
+The APK lands in `zonegate-mobile/build/app/outputs/flutter-apk/`.
+
+**Running the app is a host-side step.** An Android emulator needs KVM, which
+Docker Desktop does not pass through on Windows or macOS, so install the built
+APK on an emulator or handset yourself.
+
+The API address is compiled into the APK. Without one, the app uses
+`http://10.0.2.2:8000`, which is the host machine as seen from inside an
+emulator -- and only from inside an emulator. Pick the build for where the app
+will run:
+
+**Android emulator.** The default build works as it is:
+
+```bash
+adb install -r zonegate-mobile/build/app/outputs/flutter-apk/app-release.apk
+```
+
+**Phone over USB.** Build with the phone's own loopback, then forward that port
+to your machine. `adb reverse` alone is not enough: a default build still calls
+`10.0.2.2`, which does not exist on a phone.
+
+```bash
+MOBILE_API_URL=http://127.0.0.1:8000 docker compose up mobile
+adb install -r zonegate-mobile/build/app/outputs/flutter-apk/app-release.apk
+adb reverse tcp:8000 tcp:8000   # again after every reconnect
+```
+
+**Phone on the same Wi-Fi.** Build with your machine's LAN address and allow
+port 8000 through its firewall; no `adb reverse` is involved:
 
 ```bash
 MOBILE_API_URL=http://192.168.1.20:8000 docker compose up mobile
 ```
 
-**Running the app is a host-side step.** An Android emulator needs KVM, which
-Docker Desktop does not pass through on Windows or macOS, so install the built
-APK on an emulator or handset yourself:
-
-```bash
-adb install -r zonegate-mobile/build/app/outputs/flutter-apk/app-release.apk
-adb reverse tcp:8000 tcp:8000
-```
-
-`adb reverse` is what lets the app on the device reach the API on your machine.
-On an emulator the app defaults to `http://10.0.2.2:8000`, which is the host as
-seen from inside it.
+`MOBILE_API_URL` can also go in a `.env` file next to `docker-compose.yml`,
+alongside `CARRIER_KEY`; Compose reads both from there.
 
 ## Using a real agent runtime
 
