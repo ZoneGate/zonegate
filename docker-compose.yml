@@ -1,0 +1,137 @@
+# The whole ZoneGate stack, so a fresh clone needs Docker and nothing else.
+#
+#   docker compose up -d                # API on :8000, console on :3000, and
+#                                       # the mobile release APK built into
+#                                       # zonegate-mobile/build/app/outputs/flutter-apk/
+#   docker compose logs -f mobile       # follow the APK build
+#   docker compose --profile tools run --rm mobile-test   # mobile analyze + tests
+#
+# No Python, Node, Flutter or Android SDK has to be installed on the host.
+
+name: zonegate
+
+services:
+  api:
+    build:
+      context: ./zonegate-backend
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: production
+      APP_HOST: 0.0.0.0
+      APP_PORT: "8000"
+      LITESTAR_APP: zonegate.app:app
+      # Persisted on the host, so decisions survive `docker compose down`.
+      ZOVA_DB_PATH: /data/zonegate.zova
+      # Evidence comes from the Nokia Network as Code gateway with the key in
+      # CARRIER_KEY; the API refuses to start without one. CARRIER_MODE=rest
+      # with CARRIER_URL targets a CAMARA-conformant operator endpoint instead.
+      CARRIER_MODE: ${CARRIER_MODE:-live}
+      NOKIA_BASE_URL: ${CARRIER_URL:-}
+      NOKIA_API_KEY: ${CARRIER_KEY:-}
+      # Set NOKIA_MCP_ENABLED=true with a real
+      # config to let the agent consult Nokia Network as Code for supplemental
+      # telemetry -- advisory only; the binding evidence still comes from the
+      # gateway's REST client.
+      NOKIA_MCP_ENABLED: ${NOKIA_MCP_ENABLED:-false}
+      NOKIA_MCP_CONFIG_PATH: ${NOKIA_MCP_CONFIG_PATH:-/data/nokia_mcp.json}
+      NOKIA_MCP_STATIC_ALLOWLIST: ${NOKIA_MCP_STATIC_ALLOWLIST:-phoneNumberVerify-NV-V2,verifyLocation-LocV-V0,checkSimSwap,checkDeviceSwap,getReachabilityStatus}
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
+      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-120}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      CORS_ALLOW_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      # Console sign-in. The demo password is what gets someone in on a fresh
+      # database; the cookie stays non-Secure because this is served over http.
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      DEMO_OPERATOR_PASSWORD: ${DEMO_OPERATOR_PASSWORD:-zonegate-demo}
+    volumes:
+      - ./zonegate-backend/.docker:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./zonegate-website/zonegate-web
+      args:
+        # The console calls its own origin at /api/backend and Next proxies to
+        # the API. That has to stay same-origin: the session is an httpOnly
+        # cookie, and a cross-origin call would not carry it. Overriding
+        # NEXT_PUBLIC_API_URL with the API's own address defeats the proxy and
+        # signs everyone out, so it is deliberately not settable here.
+        #
+        # BACKEND_API_URL is where the proxy forwards to, resolved inside the
+        # web container on the compose network.
+        BACKEND_API_URL: ${BACKEND_API_URL:-http://api:8000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # Builds the field app's release APK when the stack comes up, then exits.
+  # It is not a running service: an Android emulator needs KVM, which Docker
+  # Desktop does not pass through, so the APK is installed from the host:
+  #
+  #   adb install -r zonegate-mobile/build/app/outputs/flutter-apk/app-release.apk
+  #   adb reverse tcp:8000 tcp:8000
+  #
+  # The app reaches the API at http://10.0.2.2:8000 on an emulator by default.
+  # Set MOBILE_API_URL to bake a different address in, e.g. a handset on Wi-Fi:
+  #   MOBILE_API_URL=http://192.168.1.20:8000 docker compose up -d
+  mobile:
+    build:
+      context: ./zonegate-mobile
+    command:
+      - sh
+      - -c
+      - >-
+        flutter pub get &&
+        flutter build apk --release $${API_URL:+--dart-define=API_URL=$$API_URL} &&
+        echo "APK ready: zonegate-mobile/build/app/outputs/flutter-apk/app-release.apk"
+    environment:
+      API_URL: ${MOBILE_API_URL:-}
+    restart: "no"
+    volumes:
+      # Bind-mounted so a build artefact lands on the host, ready to install.
+      - ./zonegate-mobile:/app
+      # Kept in the container: these are Linux artefacts and would collide
+      # with a host-side Flutter install.
+      - mobile-build:/app/build
+      - mobile-dart-tool:/app/.dart_tool
+      # ...except the outputs, which are the point of the build. Without this
+      # the APK is written into the named volume and never reaches the host.
+      - ./zonegate-mobile/build/app/outputs:/app/build/app/outputs
+
+  mobile-test:
+    build:
+      context: ./zonegate-mobile
+    command: ["sh", "-c", "flutter analyze && flutter test"]
+    profiles: ["tools"]
+
+  # Runs the backend suite in the same image the API ships from.
+  api-test:
+    build:
+      context: ./zonegate-backend
+      dockerfile: Dockerfile.test
+    working_dir: /src
+    entrypoint: []
+    command: ["/app/.venv/bin/python", "-m", "pytest", "tests", "-q"]
+    volumes:
+      - ./zonegate-backend:/src
+    profiles: ["tools"]
+
+  # Runs the console's unit tests.
+  web-test:
+    build:
+      context: ./zonegate-website/zonegate-web
+      target: builder
+    command: ["npx", "vitest", "run"]
+    profiles: ["tools"]
+
+volumes:
+  mobile-build:
+  mobile-dart-tool:

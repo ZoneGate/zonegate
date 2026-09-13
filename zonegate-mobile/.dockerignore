@@ -1,0 +1,10 @@
+build
+.dart_tool
+.git
+*.log
+android/.gradle
+android/local.properties
+ios
+macos
+windows
+linux

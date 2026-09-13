@@ -1,0 +1,34 @@
+# The operations console on its own.
+#
+#   docker compose up -d                          # console on :3000
+#   docker compose --profile tools run --rm test  # the unit tests
+#
+# The console calls its own origin at /api/backend and Next proxies each call
+# on to the API. That has to stay same-origin: the console session lives in an
+# httpOnly cookie, which a cross-origin request would not carry.
+#
+# BACKEND_API_URL is where the proxy forwards to, resolved from inside this
+# container. Next bakes it in at build time, so changing it means rebuilding,
+# not restarting. With the backend running from its own compose file on the
+# same machine, the default below is already correct.
+
+name: zonegate-web
+
+services:
+  web:
+    build:
+      context: ./zonegate-web
+      args:
+        BACKEND_API_URL: ${BACKEND_API_URL:-http://host.docker.internal:8000}
+    ports:
+      - "3000:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  test:
+    build:
+      context: ./zonegate-web
+      target: builder
+    command: ["npx", "vitest", "run"]
+    profiles: ["tools"]

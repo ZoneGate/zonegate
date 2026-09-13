@@ -1,0 +1,73 @@
+# The backend on its own: the API and the test suite.
+#
+#   docker compose up -d                          # API on :8000
+#   docker compose --profile tools run --rm test  # the suite
+#
+# Docker is the only prerequisite. The console and the mobile app each bring
+# their own compose file; the three together are wired up by the stack compose
+# described in the README.
+
+name: zonegate-backend
+
+services:
+  zonegate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: zonegate-backend
+    ports:
+      - "8000:8000"
+    # Deliberately no env_file. A local .env is written for running the app
+    # directly on the host, and its addresses are wrong inside a container --
+    # a carrier address or database path meant for the host makes every
+    # decision DENY on a carrier error. Note that Compose also reads .env to substitute
+    # ${...} below, so anything that describes the container's own world is
+    # written literally here and cannot be hijacked by that file.
+    environment:
+      - APP_ENV=production
+      - APP_HOST=0.0.0.0
+      - APP_PORT=8000
+      - LITESTAR_APP=zonegate.app:app
+      - ZOVA_DB_PATH=/app/.docker/zonegate.zova
+      # Evidence comes from the Nokia Network as Code gateway with the key in
+      # CARRIER_KEY; the API refuses to start without one. CARRIER_MODE=rest
+      # with CARRIER_URL targets a CAMARA-conformant operator endpoint instead.
+      - CARRIER_MODE=${CARRIER_MODE:-live}
+      - NOKIA_BASE_URL=${CARRIER_URL:-}
+      - NOKIA_API_KEY=${CARRIER_KEY:-}
+      # The agent's supplemental MCP telemetry is off; the binding evidence
+      # comes from the gateway client above either way.
+      - NOKIA_MCP_ENABLED=false
+      - NOKIA_MCP_CONFIG_PATH=/app/.docker/nokia_mcp.json
+      - NOKIA_MCP_STATIC_ALLOWLIST=
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:7b}
+      # A cold model load can take ~30s; the default has to clear that.
+      - OLLAMA_TIMEOUT=${OLLAMA_TIMEOUT:-120}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.6-flash}
+      - CORS_ALLOW_ORIGINS=${CORS_ALLOW_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      # Console sign-in. The demo password is what gets someone into the
+      # console on a fresh database; the cookie stays non-Secure because the
+      # demo is served over plain http.
+      - SESSION_TTL_HOURS=${SESSION_TTL_HOURS:-12}
+      - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
+      - DEMO_OPERATOR_PASSWORD=${DEMO_OPERATOR_PASSWORD:-zonegate-demo}
+    volumes:
+      - ./.docker:/app/.docker
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # The suite, in the same image the API ships from.
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    working_dir: /src
+    entrypoint: []
+    command: ["/app/.venv/bin/python", "-m", "pytest", "tests", "-q"]
+    volumes:
+      - .:/src
+    profiles: ["tools"]

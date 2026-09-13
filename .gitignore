@@ -1,0 +1,24 @@
+# Only the three projects, the stack compose file and the README are part of
+# this repository. Everything else in this folder is local working material.
+/*
+!/.gitignore
+!/README.md
+!/docker-compose.yml
+!/zonegate-backend/
+!/zonegate-website/
+!/zonegate-mobile/
+
+# Secrets and local state never leave the machine.
+.env
+.env.local
+zonegate-backend/.docker/
+*.zova
+
+# Build and dependency output.
+node_modules/
+.next/
+out/
+build/
+.dart_tool/
+.venv/
+__pycache__/

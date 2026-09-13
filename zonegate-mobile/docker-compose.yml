@@ -1,0 +1,38 @@
+# The field app's toolchain, so nobody has to install Flutter or the Android
+# SDK to build or test it.
+#
+#   docker compose --profile tools run --rm test              # analyze + tests
+#   docker compose --profile tools run --rm flutter \
+#       flutter build apk --release                           # the APK
+#
+# Running the app is a host-side step. An Android emulator needs KVM, which
+# Docker Desktop does not pass through on Windows or macOS -- see the README.
+
+name: zonegate-mobile
+
+services:
+  # A shell into the toolchain. Not a running service: use `docker compose run`.
+  flutter:
+    build:
+      context: .
+    volumes:
+      # Bind-mounted so a build artefact lands on the host, ready to install.
+      - .:/app
+      # Kept in the container: these are Linux artefacts and would collide with
+      # a host-side Flutter install.
+      - build:/app/build
+      - dart-tool:/app/.dart_tool
+      # ...except the outputs, which are the point of the build. Without this
+      # the APK is written into the named volume and never reaches the host.
+      - ./build/app/outputs:/app/build/app/outputs
+    profiles: ["tools"]
+
+  test:
+    build:
+      context: .
+    command: ["sh", "-c", "flutter analyze && flutter test"]
+    profiles: ["tools"]
+
+volumes:
+  build:
+  dart-tool:
