@@ -23,8 +23,8 @@ It is one of three ZoneGate surfaces:
   line and device, masked.
 - **Read a receipt** for any past decision.
 
-An evidence check the planner never requested renders as `NOT COLLECTED`, never
-as a pass. "Came back clean" and "was never asked" are different facts, and the
+An evidence check the planner never requested renders as a dash with "Not
+requested for this decision", never as a pass. "Came back clean" and "was never asked" are different facts, and the
 screen keeps them apart.
 
 ## Building without installing Flutter
@@ -40,16 +40,37 @@ The APK lands in `build/app/outputs/flutter-apk/`.
 
 **Running the app is a host-side step.** An Android emulator needs KVM, which
 Docker Desktop does not pass through on Windows or macOS. Install the built APK
-on an emulator or handset yourself:
+on an emulator or handset yourself.
+
+The API address is compiled into the APK. Without one, the app on Android uses
+`http://10.0.2.2:8000`, which is the host machine as seen from inside an
+emulator -- and only from inside an emulator. Pick the build for where the app
+will run:
+
+**Android emulator.** The default build works as it is:
 
 ```bash
 adb install -r build/app/outputs/flutter-apk/app-release.apk
-adb reverse tcp:8000 tcp:8000
 ```
 
-`adb reverse` is what lets the app on the device reach the API running on your
-machine. On an emulator the app defaults to `http://10.0.2.2:8000`, which is
-the host as seen from inside it.
+**Phone over USB.** Build with the phone's own loopback, then forward that port
+to your machine with `adb reverse`. The forward alone is not enough: a default
+build still calls `10.0.2.2`, which does not exist on a phone.
+
+```bash
+docker compose --profile tools run --rm flutter \
+    flutter build apk --release --dart-define=API_URL=http://127.0.0.1:8000
+adb install -r build/app/outputs/flutter-apk/app-release.apk
+adb reverse tcp:8000 tcp:8000   # again after every reconnect
+```
+
+**Phone on the same Wi-Fi.** Build with your machine's LAN address and allow
+port 8000 through its firewall; no `adb reverse` is involved:
+
+```bash
+docker compose --profile tools run --rm flutter \
+    flutter build apk --release --dart-define=API_URL=http://192.168.1.20:8000
+```
 
 ## Building with a local Flutter install
 
@@ -65,7 +86,7 @@ flutter run
 Point the app at a different API with a compile-time define:
 
 ```bash
-flutter run --dart-define=ZONEGATE_API_URL=http://192.168.1.20:8000
+flutter run --dart-define=API_URL=http://192.168.1.20:8000
 ```
 
 ## Tests
